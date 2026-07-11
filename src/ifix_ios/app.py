@@ -3,6 +3,7 @@ import sys
 import click
 
 from ifix_ios.core.detector import DeviceDetector, format_device_info
+from ifix_ios.core.firmware import get_device_guide, device_name, latest_signed
 from ifix_ios.core.installer import ensure_deps, are_deps_installed, install_deps
 from ifix_ios.core.restore import (
     RestoreAction,
@@ -105,6 +106,38 @@ def fix(sudo_password):
         if click.confirm("Proceed with erase restore?"):
             _run_restore(RestoreAction.ERASE, sudo_password)
         return
+
+
+@cli.command()
+def guide():
+    """Diagnóstico y guía paso a paso según el estado del dispositivo."""
+    from rich.console import Console
+    console = Console()
+
+    detector = DeviceDetector()
+    dev = detector.detect()
+
+    if dev.mode.value == "absent":
+        click.secho("🔌 No hay dispositivo conectado.", fg="yellow")
+        click.echo("   Conecta un iPhone/iPad por USB y ejecuta de nuevo.")
+        return
+
+    console.print()
+    nice = device_name(dev.product_type or "?")
+    console.print(f"📱 [bold]{nice}[/] [dim]({dev.product_type or '?'})[/]")
+    if dev.device_name:
+        console.print(f"   Nombre: {dev.device_name}")
+
+    for line in get_device_guide(dev):
+        console.print(line)
+
+    console.print()
+    console.print("[bold cyan]Presiona una tecla:[/]")
+    console.print("  [cyan]U[/] = Update (preserva datos)")
+    console.print("  [cyan]E[/] = Erase restore (borra todo)")
+    if dev.mode.value in ("bootloop", "recovery"):
+        console.print("  [cyan]R[/] = Forzar entrada a Recovery Mode")
+    console.print("  [cyan]Q[/] = Salir")
 
 
 @cli.command()

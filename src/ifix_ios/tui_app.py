@@ -21,6 +21,7 @@ from textual.widgets import (
 )
 
 from ifix_ios.core.detector import DeviceDetector, DeviceMode, DeviceInfo
+from ifix_ios.core.firmware import get_device_guide, device_name, latest_signed
 from ifix_ios.core.installer import ensure_deps
 from ifix_ios.core.restore import (
     RestoreAction,
@@ -125,6 +126,7 @@ class MainScreen(Screen):
         Binding("u", "update", "Update"),
         Binding("e", "erase", "Erase"),
         Binding("f", "fix", "Auto Fix"),
+        Binding("g", "guide", "Guide"),
         Binding("s", "setup", "Setup"),
     ]
 
@@ -143,12 +145,16 @@ class MainScreen(Screen):
         yield FooterBar()
         yield Footer()
 
+    def __init__(self):
+        super().__init__()
+        self._last_mode: DeviceMode | None = None
+
     def on_mount(self) -> None:
         self._auto_refresh_interval = self.set_interval(2, self._auto_refresh)
         self.refresh_device()
         self.app_log("[bold green]ifix-ios v0.1.0 listo[/]")
         self.app_log("Conecta un dispositivo iOS por USB o usa las teclas:")
-        self.app_log("  [cyan]D[/] detectar  [cyan]U[/] update  [cyan]E[/] erase  [cyan]F[/] fix  [cyan]Q[/] quit")
+        self.app_log("  [cyan]D[/] detectar  [cyan]U[/] update  [cyan]E[/] erase  [cyan]F[/] fix  [cyan]G[/] guide  [cyan]Q[/] quit")
 
     def app_log(self, msg: str):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -169,13 +175,32 @@ class MainScreen(Screen):
         self.app.call_from_thread(self._on_detect, dev, quiet)
 
     def _on_detect(self, dev: DeviceInfo, quiet: bool):
+        mode_changed = dev.mode != self._last_mode
+        self._last_mode = dev.mode
+
         if not quiet or dev.mode != DeviceMode.ABSENT:
             color = MODE_COLORS.get(dev.mode, "white")
             icon = MODE_ICONS.get(dev.mode, "?")
             self.app_log(f"[{color}]{icon} [{color}]{dev.mode.value.upper()}[/]")
             if dev.device_name and dev.product_version:
                 self.app_log(f"   {dev.device_name} — iOS {dev.product_version}")
+
+        if mode_changed and dev.mode != DeviceMode.ABSENT:
+            self.show_guide(dev)
+
         self._update_footer(dev)
+
+    def show_guide(self, dev: DeviceInfo | None = None):
+        if dev is None:
+            detector = DeviceDetector()
+            dev = detector.detect()
+        self.app_log("[bold]── Guía paso a paso ──[/]")
+        for line in get_device_guide(dev):
+            self.app_log(line)
+        self.app_log("[bold]─────────────────────[/]")
+
+    def action_guide(self) -> None:
+        self.show_guide()
 
     def _update_footer(self, dev: DeviceInfo):
         color = MODE_COLORS.get(dev.mode, "gray")
@@ -183,7 +208,7 @@ class MainScreen(Screen):
         left = f"[{color}]{icon} {dev.mode.value.upper()}[/]"
         if dev.device_name:
             left += f" — {dev.device_name}"
-        right = "[dim]Q[/]uit [dim]D[/]etect [dim]U[/]pdate [dim]E[/]rase [dim]F[/]ix"
+        right = "[dim]Q[/]uit [dim]D[/]etect [dim]U[/]pdate [dim]E[/]rase [dim]F[/]ix [dim]G[/]uide"
         self.query_one(FooterBar).update(f"{left}  │  {right}")
 
     def action_detect(self) -> None:
