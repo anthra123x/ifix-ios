@@ -22,10 +22,10 @@ from textual.widgets import (
 )
 
 from ifix_ios.core.detector import DeviceDetector, DeviceMode, DeviceInfo
+from ifix_ios.core.installer import ensure_deps
 from ifix_ios.core.restore import (
     RestoreAction,
     RestoreRunner,
-    check_dependencies,
 )
 
 
@@ -156,12 +156,8 @@ class MainScreen(Screen):
         action_name = "update" if action == RestoreAction.UPDATE else "erase restore"
         log.write(f"[bold yellow]Starting {action_name}...[/bold yellow]")
 
-        deps = check_dependencies()
-        if deps:
-            log.write("[red]Missing dependencies:[/red]")
-            for d in deps:
-                log.write(f"  • {d}")
-            log.write("[yellow]Install: sudo dnf install idevicerestore libimobiledevice-utils[/yellow]")
+        if not ensure_deps():
+            log.write("[red]Dependencies missing. Run: ifix-ios setup[/red]")
             return
 
         log.write("[dim]Requesting sudo password (check terminal)...[/dim]")

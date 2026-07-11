@@ -173,10 +173,10 @@ class RestoreRunner:
 
 def check_dependencies() -> list[str]:
     missing: list[str] = []
-    for cmd in ["idevicerestore", "idevice_id", "ideviceinfo", "lsusb"]:
+    for cmd in ["idevicerestore"]:
         try:
             subprocess.run(
-                [cmd, "--version"] if cmd != "lsusb" else [cmd],
+                [cmd, "--version"],
                 capture_output=True, timeout=3
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):

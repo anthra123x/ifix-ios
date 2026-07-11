@@ -42,6 +42,25 @@ class DeviceInfo:
 
 class DeviceDetector:
     def scan_usb(self) -> tuple[DeviceMode, str | None]:
+        mode, pid_str = self._scan_usb_pyusb()
+        if mode not in (DeviceMode.UNKNOWN, DeviceMode.ABSENT):
+            return mode, pid_str
+        return self._scan_usb_lsusb()
+
+    def _scan_usb_pyusb(self) -> tuple[DeviceMode, str | None]:
+        try:
+            import usb.core
+            import usb.backend.libusb1
+            device = usb.core.find(idVendor=USB_VENDOR_APPLE)
+            if device is None:
+                return DeviceMode.ABSENT, None
+            pid = device.idProduct
+            mode = USB_PRODUCT_IDS.get(pid, DeviceMode.UNKNOWN)
+            return mode, f"{pid:04x}"
+        except (ImportError, usb.core.USBError, ValueError):
+            return DeviceMode.UNKNOWN, None
+
+    def _scan_usb_lsusb(self) -> tuple[DeviceMode, str | None]:
         try:
             result = subprocess.run(
                 ["lsusb"],
@@ -95,6 +114,9 @@ class DeviceDetector:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
+    def has_idevice_tools(self) -> bool:
+        return self.get_idevice_id() is not None
+
     def detect(self) -> DeviceInfo:
         dev = DeviceInfo()
         usb_mode, usb_id = self.scan_usb()
@@ -104,25 +126,32 @@ class DeviceDetector:
         if usb_mode == DeviceMode.ABSENT:
             return dev
 
+        has_tools = self.has_idevice_tools()
+
         if usb_mode == DeviceMode.DFU:
-            dev.udid = self.get_idevice_id()
+            if has_tools:
+                dev.udid = self.get_idevice_id()
             return dev
 
-        if usb_mode == DeviceMode.RECOVERY:
-            try:
-                result = subprocess.run(
-                    ["idevicerestore", "-l", "-n", "-y"],
-                    capture_output=True, text=True, timeout=10
-                )
-                for line in result.stdout.splitlines():
-                    if "ECID:" in line:
-                        dev.ecid = line.split(":")[-1].strip()
-                    elif "Identified device as" in line:
-                        dev.product_type = line.split("as")[-1].strip().split(",")[0]
-                    elif "device serial number is" in line:
-                        dev.serial = line.split("is")[-1].strip()
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+        if usb_mode in (DeviceMode.RECOVERY, DeviceMode.UNKNOWN):
+            if has_tools:
+                try:
+                    result = subprocess.run(
+                        ["idevicerestore", "-l", "-n", "-y"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    for line in result.stdout.splitlines():
+                        if "ECID:" in line:
+                            dev.ecid = line.split(":")[-1].strip()
+                        elif "Identified device as" in line:
+                            dev.product_type = line.split("as")[-1].strip().split(",")[0]
+                        elif "device serial number is" in line:
+                            dev.serial = line.split("is")[-1].strip()
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+            return dev
+
+        if not has_tools:
             return dev
 
         device_id = self.get_idevice_id()

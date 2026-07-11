@@ -3,6 +3,7 @@ import sys
 import click
 
 from ifix_ios.core.detector import DeviceDetector, format_device_info
+from ifix_ios.core.installer import ensure_deps, are_deps_installed, install_deps
 from ifix_ios.core.restore import (
     RestoreAction,
     RestoreRunner,
@@ -22,16 +23,7 @@ def cli():
 
 @cli.command()
 def detect():
-    """Detect current iOS device state."""
-    deps = check_dependencies()
-    if deps:
-        click.secho("Missing dependencies:", fg="red", bold=True)
-        for d in deps:
-            click.echo(f"  • {d}")
-        click.echo("\nInstall them with:")
-        click.echo("  sudo dnf install idevicerestore libimobiledevice-utils usbmuxd")
-        return
-
+    """Detect current iOS device state (works without idevicerestore)."""
     detector = DeviceDetector()
     dev = detector.detect()
 
@@ -49,6 +41,8 @@ def detect():
 @click.option("--sudo-password", "-p", help="sudo password (omit for automatic detection)")
 def update(sudo_password):
     """Update iOS preserving user data."""
+    if not ensure_deps(sudo_password):
+        return
     _run_restore(RestoreAction.UPDATE, sudo_password)
 
 
@@ -57,6 +51,8 @@ def update(sudo_password):
 @click.confirmation_option(prompt="This will ERASE ALL DATA. Continue?")
 def restore(sudo_password):
     """Full erase restore."""
+    if not ensure_deps(sudo_password):
+        return
     _run_restore(RestoreAction.ERASE, sudo_password)
 
 
@@ -64,11 +60,7 @@ def restore(sudo_password):
 @click.option("--sudo-password", "-p", default=None)
 def fix(sudo_password):
     """Auto-detect issue and apply best fix."""
-    deps = check_dependencies()
-    if deps:
-        click.secho("Missing dependencies. Install:", fg="red")
-        for d in deps:
-            click.echo(f"  • {d}")
+    if not ensure_deps(sudo_password):
         return
 
     detector = DeviceDetector()
@@ -111,6 +103,20 @@ def fix(sudo_password):
         if click.confirm("Proceed with erase restore?"):
             _run_restore(RestoreAction.ERASE, sudo_password)
         return
+
+
+@cli.command()
+@click.option("--sudo-password", "-p", default=None)
+def setup(sudo_password):
+    """Install system dependencies (idevicerestore + libimobiledevice)."""
+    if are_deps_installed():
+        click.secho("All dependencies already installed.", fg="green")
+        return
+    if install_deps(sudo_password):
+        click.secho("Setup complete!", fg="green")
+    else:
+        click.secho("Setup failed. See above for details.", fg="red")
+        raise SystemExit(1)
 
 
 @cli.command()
