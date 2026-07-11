@@ -9,7 +9,7 @@
 
 **ifix-ios** es una herramienta de terminal todo-en-uno para diagnosticar y reparar dispositivos iOS (iPhone/iPad) con problemas de software — logo de Apple congelado, boot-loop, modo recovery, modo DFU, pantalla negra tras actualización.
 
-Solo escribes `ifix-ios` y se abre una **interfaz interactiva** tipo `htop`/`btop`. Detecta el dispositivo, te dice qué versión de iOS necesita y te guía paso a paso para repararlo.
+Solo escribes `ifix-ios` y se abre una **interfaz interactiva** tipo `htop`/`btop`. Detecta el dispositivo en tiempo real (cada 2s), te dice qué versión de iOS necesita y te guía paso a paso para repararlo.
 
 ---
 
@@ -27,31 +27,54 @@ pip install ifix-ios
 ifix-ios
 ```
 
-Esto abre la **TUI interactiva**. El tool detecta automáticamente el estado del dispositivo cada 2 segundos y te muestra en pantalla:
-
-### 3. La TUI te guía
+La TUI se abre inmediatamente. Sin dispositivo conectado se ve limpia:
 
 ```
-┌── DISPOSITIVO ──   │ 10:58:18 ⚠ RECOVERY                  ┐
-│  Estado:   ⚠ RECOVERY│ 10:58:18 iPhone 16 Pro Max          │
-│  Nombre:   iPhone...  │ 10:58:18 ── Guía paso a paso ──     │
-│  Modelo:   iPhone17,2 │ 10:58:18 📱 iPhone 16 Pro Max       │
-│  iOS:      26.5.2     │ 10:58:18 ⚠ MODO RECUPERACIÓN       │
-│  UDID:     0000..     │ 10:58:18 📋 Plan de acción:        │
-│  ECID:     2644..     │ 10:58:18 [1] Update (preserva datos)│
-│ ── ACCIONES ──        │ 10:58:18 [2] Erase Restore          │
-│  D  Detectar          │ 10:58:18 ─────────────────────────   │
-│  U  Update (datos)    │                                     │
-│  E  Erase (borra todo)│ Versión firmada: 26.5.2 (23F84)     │
-│  G  Guía paso a paso  │                                     │
-│  F  Auto Fix          │━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 0%  │
-│  Q  Salir             │                                     │
-├─────────────────────────────────────────────────────────────┤
-│ ⚠ RECOVERY — iPhone 16 Pro Max │ q d u e f g               │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────┬──────────────────────────────────┐
+│                       │ 01:23:45 ○ No conectado           │
+│   (vacío)             │                                  │
+│                       │                                  │
+│                       │                                  │
+│                       │                                  │
+│ ── ACCIONES ──        │                                  │
+│  D  Detectar          │                                  │
+│  U  Update (datos)    │                                  │
+│  E  Erase (borra todo)│                                  │
+│  F  Auto Fix          │                                  │
+│  G  Guía paso a paso  │                                  │
+│  S  Setup             │                                  │
+│  Q  Salir             │                                  │
+├───────────────────────┴──────────────────────────────────┤
+│ ○ No conectado                                           │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### 4. Elegir acción
+Al conectar un iPhone, en ≤2s se actualiza automáticamente:
+
+```
+┌── DISPOSITIVO ───────┬──────────────────────────────────┐
+│  Estado:   ✓ NORMAL  │ 01:23:47 ✓ NORMAL                 │
+│  Nombre:   iPhone... │ 01:23:47 iPhone 16 Pro Max        │
+│  Modelo:   iPhone17,2│           — iOS 26.5.2            │
+│  iOS:      26.5.2    │ 01:23:47 ── Guía paso a paso ──  │
+│  UDID:     0000..    │ 📱 iPhone 16 Pro Max              │
+│  ECID:     2644..    │ ✓ Dispositivo funcionando         │
+│  Activ:    unlocked  │   correctamente.                  │
+│  Batería:  ██████░   │ ─────────────────────────────────  │
+│ ── ACCIONES ──       │                                    │
+│  D  Detectar         │                                    │
+│  U  Update (datos)   │                                    │
+│  E  Erase (borra todo│━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 0%  │
+│  F  Auto Fix         │                                    │
+│  G  Guía paso a paso │                                    │
+│  S  Setup            │                                    │
+│  Q  Salir            │                                    │
+├──────────────────────┴───────────────────────────────────┤
+│ ✓ NORMAL — iPhone de Prueba │ Q D U E F G S              │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 3. Elegir acción
 
 | Tecla | Acción | Qué hace |
 |-------|--------|----------|
@@ -60,7 +83,7 @@ Esto abre la **TUI interactiva**. El tool detecta automáticamente el estado del
 | `F` | Auto Fix | Detecta el problema y aplica la mejor solución |
 | `G` | Guide | Muestra diagnóstico y guía paso a paso |
 | `D` | Detect | Refresca detección manualmente |
-| `S` | Setup | Instala dependencias del sistema |
+| `S` | Setup | Instala dependencias del sistema (`sudo`) |
 | `Q` | Quit | Salir |
 
 > El tool **busca automáticamente** la última versión de iOS firmada por Apple
@@ -82,7 +105,6 @@ Esto abre la **TUI interactiva**. El tool detecta automáticamente el estado del
 📋 Plan de acción:
   [1] U  Update — Reinstala iOS sin borrar datos (RECOMENDADO)
   [2] E  Erase Restore — Si el update no funciona
-  [3] D  Force Recovery — Forzar modo recovery manualmente
 
   Recomendación: Conecta el cable, pon el dispositivo en Recovery
   (subir/bajar volumen rápido, luego hold botón lateral)
@@ -128,21 +150,14 @@ Esto abre la **TUI interactiva**. El tool detecta automáticamente el estado del
 
 ---
 
-## 🧪 Modo simulado (pruebas sin iPhone real)
+## 🔧 Dependencias del sistema
 
-```bash
-# Simular cada modo en terminales separadas
-python dev/mock_device.py normal
-python dev/mock_device.py bootloop
-python dev/mock_device.py recovery
-python dev/mock_device.py dfu
-```
+La TUI detecta cuando faltan `ideviceinfo`/`idevicerestore` y muestra la info
+disponible sin ellas. Para info completa (batería, nombre, versión iOS):
 
----
+**Opción A** — Desde la TUI: presiona `S`
 
-## 🔧 Instalación manual de dependencias
-
-Si el auto-setup falla, instala manualmente:
+**Opción B** — Manual:
 
 ```bash
 # Fedora
@@ -155,13 +170,34 @@ sudo apt install idevicerestore libimobiledevice-utils usbmuxd
 sudo pacman -S idevicerestore libimobiledevice usbmuxd
 ```
 
+Si la TUI no puede ejecutar `sudo` interactivamente (entorno sin TTY),
+ejecutá en otra terminal:
+
+```bash
+ifix-ios setup
+```
+
+---
+
+## 🧪 Modo simulado (pruebas sin iPhone real)
+
+```bash
+python dev/mock_device.py normal
+python dev/mock_device.py bootloop
+python dev/mock_device.py recovery
+python dev/mock_device.py dfu
+```
+
 ---
 
 ## 📦 Características
 
-- **TUI profesional** tipo htop/btop — `ifix-ios` abre la interfaz directamente
-- **Detección automática** cada 2 segundos (conecta/desconecta sin reiniciar)
+- **TUI profesional** tipo htop/btop — se abre con solo `ifix-ios`
+- **Detección automática cada 2s** — conectá o desconectá sin reiniciar
+- **LogPanel se limpia en cada transición** — sin datos stale de dispositivos anteriores
+- **Panel vacío sin dispositivo** — interfaz limpia cuando no hay nada conectado
 - **Guía paso a paso** según el modo detectado
+- **Batería** y detalles completos del dispositivo
 - **Consulta de firmware** vía ipsw.me API — muestra la última versión firmada
 - **Update** — Reinstala iOS sin eliminar datos
 - **Erase Restore** — Borrado completo + instalación limpia
@@ -179,7 +215,7 @@ ifix-ios/
 ├── src/ifix_ios/
 │   ├── app.py              # CLI con Click (ifix-ios detect/update/...)
 │   ├── tui_app.py           # TUI interactiva con Textual
-│   ├── ifix_ios.tcss        # Estilos CSS para la TUI
+│   ├── ifix_ios.tcss        # Estilos CSS Tokyo Night
 │   └── core/
 │       ├── detector.py      # Detección USB (pyusb + lsusb)
 │       ├── restore.py       # Wrapper de idevicerestore
