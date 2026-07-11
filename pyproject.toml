@@ -7,7 +7,7 @@ name = "ifix-ios"
 version = "0.1.0"
 description = "Terminal-based iOS device recovery tool for Linux"
 readme = "README.md"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 requires-python = ">=3.12"
 authors = [
     {name = "ifix-ios contributors"},

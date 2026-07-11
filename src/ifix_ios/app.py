@@ -11,7 +11,11 @@ from ifix_ios.core.restore import (
 
 
 @click.group()
-@click.version_option(version="0.1.0")
+@click.version_option(
+    version="0.1.0",
+    prog_name="ifix-ios",
+    message="%(prog)s v%(version)s — iOS Device Recovery Tool\nCopyright (c) 2026 anthra123x — MIT License",
+)
 def cli():
     pass
 
