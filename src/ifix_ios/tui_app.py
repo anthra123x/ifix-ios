@@ -1,17 +1,14 @@
-import asyncio
-import time
+import threading
 from datetime import datetime
 from pathlib import Path
 
-from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import (
-    Button,
     Footer,
     Header,
     Label,
@@ -57,6 +54,10 @@ class DevicePanel(Static):
         self.styles.height = "100%"
 
     def watch_device(self, dev: DeviceInfo):
+        if dev.mode == DeviceMode.ABSENT:
+            self.update("")
+            return
+
         color = MODE_COLORS.get(dev.mode, "white")
         icon = MODE_ICONS.get(dev.mode, "?")
         mode_display = f"[{color}]{icon} {dev.mode.value.upper()}[/]"
@@ -92,6 +93,7 @@ class DevicePanel(Static):
             "  [b cyan]U[/]  Update (preserva datos)",
             "  [b cyan]E[/]  Erase restore (borra todo)",
             "  [b cyan]F[/]  Auto Fix",
+            "  [b cyan]G[/]  Guía paso a paso",
             "  [b cyan]S[/]  Setup (instalar deps)",
             "  [b cyan]Q[/]  Salir",
             "",
@@ -109,14 +111,9 @@ class LogPanel(RichLog):
 
 
 class FooterBar(Static):
-    status = reactive("")
-
     def __init__(self):
         super().__init__("")
         self.styles.height = 1
-
-    def watch_status(self, val: str):
-        self.update(val)
 
 
 class MainScreen(Screen):
@@ -152,13 +149,20 @@ class MainScreen(Screen):
     def on_mount(self) -> None:
         self._auto_refresh_interval = self.set_interval(2, self._auto_refresh)
         self.refresh_device()
-        self.app_log("[bold green]ifix-ios v0.1.0 listo[/]")
-        self.app_log("Conecta un dispositivo iOS por USB o usa las teclas:")
-        self.app_log("  [cyan]D[/] detectar  [cyan]U[/] update  [cyan]E[/] erase  [cyan]F[/] fix  [cyan]G[/] guide  [cyan]Q[/] quit")
 
     def app_log(self, msg: str):
         ts = datetime.now().strftime("%H:%M:%S")
-        self.query_one(LogPanel).write(f"[dim]{ts}[/] {msg}")
+        formatted = f"[dim]{ts}[/] {msg}"
+        if threading.get_ident() == self.app._thread_id:
+            self._write_log(formatted)
+        else:
+            self.app.call_from_thread(self._write_log, formatted)
+
+    def _write_log(self, msg: str):
+        self.query_one(LogPanel).write(msg)
+
+    def _clear_log(self):
+        self.query_one(LogPanel).clear()
 
     def refresh_device(self):
         self._detect_device()
@@ -170,22 +174,35 @@ class MainScreen(Screen):
     def _detect_device(self, quiet: bool = False) -> None:
         detector = DeviceDetector()
         dev = detector.detect()
+        self.app.call_from_thread(self._on_detection_complete, dev, quiet)
+
+    def _on_detection_complete(self, dev: DeviceInfo, quiet: bool):
         panel = self.query_one(DevicePanel)
         panel.device = dev
-        self.app.call_from_thread(self._on_detect, dev, quiet)
 
-    def _on_detect(self, dev: DeviceInfo, quiet: bool):
         mode_changed = dev.mode != self._last_mode
         self._last_mode = dev.mode
 
-        if not quiet or dev.mode != DeviceMode.ABSENT:
-            color = MODE_COLORS.get(dev.mode, "white")
-            icon = MODE_ICONS.get(dev.mode, "?")
-            self.app_log(f"[{color}]{icon} [{color}]{dev.mode.value.upper()}[/]")
-            if dev.device_name and dev.product_version:
-                self.app_log(f"   {dev.device_name} — iOS {dev.product_version}")
+        if mode_changed:
+            self._clear_log()
 
-        if mode_changed and dev.mode != DeviceMode.ABSENT:
+        if dev.mode == DeviceMode.ABSENT:
+            if mode_changed:
+                self._write_log("[dim]○ No hay dispositivo conectado[/]")
+            self._update_footer(dev)
+            return
+
+        color = MODE_COLORS.get(dev.mode, "white")
+        icon = MODE_ICONS.get(dev.mode, "?")
+        self._write_log(f"[{color}]{icon} [{color}]{dev.mode.value.upper()}[/]")
+        if dev.device_name and dev.product_version:
+            self._write_log(f"   {dev.device_name} — iOS {dev.product_version}")
+        elif not dev.device_name and not dev.product_version:
+            self._write_log("[yellow]Info limitada — presiona [cyan]S[/] Setup para batería, nombre e iOS[/]")
+        elif dev.device_name:
+            self._write_log(f"   {dev.device_name}")
+
+        if mode_changed:
             self.show_guide(dev)
 
         self._update_footer(dev)
@@ -194,21 +211,31 @@ class MainScreen(Screen):
         if dev is None:
             detector = DeviceDetector()
             dev = detector.detect()
-        self.app_log("[bold]── Guía paso a paso ──[/]")
+        self._write_log("[bold]── Guía paso a paso ──[/]")
         for line in get_device_guide(dev):
-            self.app_log(line)
-        self.app_log("[bold]─────────────────────[/]")
+            self._write_log(line)
+        self._write_log("[bold]─────────────────────[/]")
 
     def action_guide(self) -> None:
-        self.show_guide()
+        logger = self.query_one(LogPanel)
+        logger.clear()
+        detector = DeviceDetector()
+        dev = detector.detect()
+        if dev.mode == DeviceMode.ABSENT:
+            self._write_log("[dim]○ No hay dispositivo conectado[/]")
+            return
+        self.show_guide(dev)
 
     def _update_footer(self, dev: DeviceInfo):
-        color = MODE_COLORS.get(dev.mode, "gray")
+        if dev.mode == DeviceMode.ABSENT:
+            self.query_one(FooterBar).update("[gray]○ No conectado[/]")
+            return
+        color = MODE_COLORS.get(dev.mode, "white")
         icon = MODE_ICONS.get(dev.mode, "?")
         left = f"[{color}]{icon} {dev.mode.value.upper()}[/]"
         if dev.device_name:
             left += f" — {dev.device_name}"
-        right = "[dim]Q[/]uit [dim]D[/]etect [dim]U[/]pdate [dim]E[/]rase [dim]F[/]ix [dim]G[/]uide"
+        right = "[dim]Q[/]uit [dim]D[/]etect [dim]U[/]pdate [dim]E[/]rase [dim]F[/]ix [dim]G[/]uide [dim]S[/]etup"
         self.query_one(FooterBar).update(f"{left}  │  {right}")
 
     def action_detect(self) -> None:
@@ -222,24 +249,33 @@ class MainScreen(Screen):
     def action_erase(self) -> None:
         self._run_restore_workflow(RestoreAction.ERASE)
 
+    @work(thread=True)
     def action_setup(self) -> None:
-        self.app_log("[yellow]Ejecutando setup...[/]")
-        if ensure_deps():
-            self.app_log("[green]✓ Dependencias instaladas correctamente[/]")
+        self.app_log("[yellow]▶ Instalando dependencias...[/]")
+        try:
+            ok = ensure_deps()
+        except Exception as e:
+            self.app_log(f"[red]✗ Error: {e}[/]")
+            return
+        if ok:
+            self.app_log("[green]✓ Dependencias instaladas[/]")
+            detector = DeviceDetector()
+            dev = detector.detect()
+            self.app.call_from_thread(self._on_detection_complete, dev, False)
         else:
-            self.app_log("[red]✗ Error al instalar dependencias[/]")
+            self.app_log("[red]✗ Falló instalación[/]")
+            self.app_log("[yellow]Ejecutá [bold cyan]sudo dnf install libimobiledevice-utils[/] manualmente[/]")
 
     def _run_restore_workflow(self, action: RestoreAction) -> None:
         action_name = "update" if action == RestoreAction.UPDATE else "erase restore"
         self.app_log(f"[bold yellow]▶ Iniciando {action_name}...[/]")
 
         if not ensure_deps():
-            self.app_log("[red]Faltan dependencias. Tecla [bold]S[/] para setup[/]")
+            self.app_log("[red]Faltan dependencias. Presiona [bold]S[/] para setup[/]")
             return
 
         runner = RestoreRunner()
-        progress = self.query_one(ProgressBar)
-        progress.update(total=100, advance=0)
+        self._update_progress(0, 0)
         last_phase = ""
 
         for state in runner.run(action):
@@ -247,25 +283,41 @@ class MainScreen(Screen):
                 self.app_log(f"[red]✗ Error: {state.error}[/]")
                 return
             if state.done:
-                progress.progress = 100
-                if state.success:
-                    self.app_log("[green]✓ Restore completado. El dispositivo debería reiniciarse.[/]")
-                    self.app_log("[dim]Desconecta el cable cuando veas la pantalla de configuración.[/]")
-                else:
-                    self.app_log(f"[red]✗ Falló: {state.error or 'Desconocido'}[/]")
+                self._set_progress_done(state.success)
                 return
             phase = state.phase.value
             if phase != last_phase:
                 self.app_log(f"[cyan]{phase}[/]")
                 last_phase = phase
-            progress.update(total=100, advance=state.percent - progress.progress)
+            self._update_progress(state.percent, 100)
+
+    def _update_progress(self, value: int, total: int):
+        self.app.call_from_thread(self._do_update_progress, value, total)
+
+    def _do_update_progress(self, value: int, total: int):
+        progress = self.query_one(ProgressBar)
+        if progress.total != total:
+            progress.update(total=total)
+        progress.update(advance=value - progress.progress)
+
+    def _set_progress_done(self, success: bool):
+        self.app.call_from_thread(self._do_progress_done, success)
+
+    def _do_progress_done(self, success: bool):
+        progress = self.query_one(ProgressBar)
+        progress.progress = 100
+        if success:
+            self._write_log("[green]✓ Restore completado. El dispositivo debería reiniciarse.[/]")
+            self._write_log("[dim]Desconecta el cable cuando veas la pantalla de configuración.[/]")
+        else:
+            self._write_log("[red]✗ Falló el restore[/]")
 
     @work(thread=True)
     def action_fix(self) -> None:
         self.app_log("[bold yellow]▶ Auto Fix...[/]")
 
         if not ensure_deps():
-            self.app_log("[red]Faltan dependencias. Tecla [bold]S[/] para setup[/]")
+            self.app_log("[red]Faltan dependencias. Presiona [bold]S[/] para setup[/]")
             return
 
         detector = DeviceDetector()
