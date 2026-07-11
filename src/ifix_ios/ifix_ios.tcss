@@ -1,0 +1,77 @@
+Screen {
+    background: #1a1b26;
+}
+
+Header {
+    background: #24253a;
+    color: #c0caf5;
+}
+
+Footer {
+    background: #1a1b26;
+    color: #565f89;
+}
+
+#main-content {
+    height: 100%;
+    width: 100%;
+}
+
+DevicePanel {
+    width: 34;
+    min-width: 34;
+    padding: 0 1;
+    background: #1f2137;
+    border-right: solid #2f3148;
+    height: 100%;
+}
+
+#right-panel {
+    width: 1fr;
+    height: 100%;
+}
+
+#log-header {
+    dock: top;
+    height: 1;
+    background: #24253a;
+    color: #565f89;
+    text-style: bold;
+}
+
+LogPanel {
+    height: 1fr;
+    background: #1a1b26;
+    color: #c0caf5;
+    padding: 0 1;
+}
+
+ProgressBar {
+    height: 1;
+    dock: bottom;
+    margin: 1 2;
+}
+
+ProgressBar > .bar {
+    color: #7aa2f7;
+    background: #2f3148;
+}
+
+ProgressBar > .complete {
+    color: #9ece6a;
+}
+
+FooterBar {
+    background: #24253a;
+    color: #565f89;
+    padding: 0 2;
+    text-style: bold;
+}
+
+Button {
+    width: 100%;
+}
+
+Button:hover {
+    text-style: bold;
+}

@@ -11,14 +11,16 @@ from ifix_ios.core.restore import (
 )
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(
     version="0.1.0",
     prog_name="ifix-ios",
     message="%(prog)s v%(version)s — iOS Device Recovery Tool\nCopyright (c) 2026 anthra123x — MIT License",
 )
-def cli():
-    pass
+@click.pass_context
+def cli(ctx):
+    if ctx.invoked_subcommand is None:
+        launch_tui()
 
 
 @cli.command()
@@ -143,17 +145,20 @@ def monitor():
             pass
 
 
+def launch_tui():
+    try:
+        from ifix_ios.tui_app import main as tui_main
+        tui_main()
+    except ImportError as e:
+        click.secho(f"Error al abrir TUI: {e}", fg="red")
+        click.echo("Asegúrate de tener textual: pip install 'ifix-ios[tui]'")
+        click.echo("  o: pip install textual")
+
+
 @cli.command()
 def tui():
-    """Launch interactive TUI."""
-    try:
-        from ifix_ios.tui_app import IDeviceTUI
-        from textual.app import App
-        app = IDeviceTUI()
-        app.run()
-    except ImportError as e:
-        click.secho(f"Failed to launch TUI: {e}", fg="red")
-        click.echo("Make sure textual is installed: pip install textual")
+    """Launch interactive TUI (default si no se da subcomando)."""
+    launch_tui()
 
 
 def _run_restore(action: RestoreAction, sudo_password: str | None):
