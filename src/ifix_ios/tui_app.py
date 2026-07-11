@@ -116,7 +116,7 @@ class MainScreen(Screen):
         dev = detector.detect()
         status = self.query_one(DeviceStatusWidget)
         status.device = dev
-        self.call_from_thread(self._on_detect, dev)
+        self.app.call_from_thread(self._on_detect, dev)
 
     def _on_detect(self, dev: DeviceInfo):
         log = self.query_one(LogWidget)
