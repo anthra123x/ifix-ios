@@ -24,6 +24,20 @@ def test_restore_progress_done_alt():
     assert p.success
 
 
+def test_restore_progress_done_lowercase():
+    p = RestoreProgress()
+    p.update("restore finished")
+    assert p.done
+    assert p.success
+
+
+def test_restore_progress_done_sending():
+    p = RestoreProgress()
+    p.update("Done sending iBEC")
+    assert p.done
+    assert p.success
+
+
 def test_restore_progress_verifying():
     p = RestoreProgress()
     p.update("Verifying 'iPhone.ipsw'...")
@@ -40,6 +54,13 @@ def test_restore_progress_downloading():
     assert p.percent == 1
 
 
+def test_restore_progress_uploading():
+    p = RestoreProgress()
+    p.update("Uploading [=========] 45.0%")
+    assert p.phase == RestorePhase.UPLOADING
+    assert p.percent == 45
+
+
 def test_restore_progress_error():
     p = RestoreProgress()
     p.update("Error: Could not connect to lockdownd (-12)")
@@ -47,3 +68,21 @@ def test_restore_progress_error():
     assert p.done
     assert not p.success
     assert "lockdownd" in (p.error or "")
+
+
+def test_restore_progress_sealing():
+    p = RestoreProgress()
+    p.update("Sealing System Volume 75.0%")
+    assert p.phase == RestorePhase.SEALING
+    assert p.percent == 75
+
+
+def test_restore_progress_multiple_percent_formats():
+    p = RestoreProgress()
+    p.update("Verifying 50%")
+    assert p.percent == 50
+
+
+def test_restore_actions():
+    assert RestoreAction.UPDATE.value == "update"
+    assert RestoreAction.ERASE.value == "erase"

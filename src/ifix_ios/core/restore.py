@@ -1,8 +1,8 @@
 import re
+import signal
 import subprocess
-import sys
 from enum import Enum
-from pathlib import Path
+from typing import Generator
 
 
 class RestoreAction(Enum):
@@ -11,17 +11,17 @@ class RestoreAction(Enum):
 
 
 class RestorePhase(Enum):
-    CHECKING = "Checking device..."
-    VERIFYING = "Verifying firmware..."
-    DOWNLOADING = "Downloading firmware..."
-    EXTRACTING = "Extracting firmware..."
-    SENDING_IBEC = "Sending iBEC..."
-    UPLOADING = "Uploading components..."
-    INSTALLING = "Installing RecoveryOS..."
-    SEALING = "Sealing system volume..."
-    FINISHING = "Finishing..."
-    DONE = "Done"
-    FAILED = "Failed"
+    CHECKING = "Verificando dispositivo..."
+    VERIFYING = "Verificando firmware..."
+    DOWNLOADING = "Descargando firmware..."
+    EXTRACTING = "Extrayendo firmware..."
+    SENDING_IBEC = "Enviando iBEC..."
+    UPLOADING = "Subiendo componentes..."
+    INSTALLING = "Instalando RecoveryOS..."
+    SEALING = "Sellando volumen del sistema..."
+    FINISHING = "Finalizando..."
+    DONE = "Completado"
+    FAILED = "Falló"
 
 
 class RestoreProgress:
@@ -35,72 +35,78 @@ class RestoreProgress:
         self.error: str | None = None
 
     def update(self, line: str):
-        if "Done sending" in line or "DONE" in line:
-            self.done = True
-            self.success = True
-            self.phase = RestorePhase.DONE
-            self.percent = 100
-            return
+        line_lower = line.lower()
 
-        if "Status: Restore Finished" in line:
-            self.done = True
-            self.success = True
-            self.phase = RestorePhase.DONE
-            self.percent = 100
-            return
-
-        if "Found device in Recovery mode" in line:
-            self.phase = RestorePhase.CHECKING
-            self.percent = 0
-            return
-
-        if "Verifying" in line:
-            self.phase = RestorePhase.VERIFYING
-            self._parse_percent(line)
-            return
-
-        if "Downloading" in line:
-            self.phase = RestorePhase.DOWNLOADING
-            self._parse_percent(line)
-            return
-
-        if "Uploading" in line:
-            self.phase = RestorePhase.UPLOADING
-            self._parse_percent(line)
-            self.component = self._extract_component(line)
-            return
-
-        if "Sending" in line and "(" in line:
-            self.phase = RestorePhase.UPLOADING
-            self.message = line.strip()[:60]
-            return
-
-        if "Error" in line or "error" in line:
+        if "error" in line_lower:
             self.error = line.strip()
             self.phase = RestorePhase.FAILED
             self.success = False
             self.done = True
             return
 
-        if "Unmounting filesystems" in line:
+        if ("done" in line_lower and "sending" in line_lower) or line.strip() == "DONE":
+            self._finish_success()
+            return
+
+        if "status:" in line_lower and "restore finished" in line_lower:
+            self._finish_success()
+            return
+
+        if "restore finished" in line_lower:
+            self._finish_success()
+            return
+
+        if "found device in recovery mode" in line_lower:
+            self.phase = RestorePhase.CHECKING
+            self.percent = 0
+            self.component = ""
+            self.message = ""
+            return
+
+        if "verifying" in line_lower:
+            self.phase = RestorePhase.VERIFYING
+            self._parse_percent(line)
+            return
+
+        if "downloading" in line_lower:
+            self.phase = RestorePhase.DOWNLOADING
+            self._parse_percent(line)
+            return
+
+        if "uploading" in line_lower:
+            self.phase = RestorePhase.UPLOADING
+            self._parse_percent(line)
+            self.component = self._extract_component(line)
+            return
+
+        if "sending" in line_lower and "(" in line:
+            self.phase = RestorePhase.UPLOADING
+            self.message = line.strip()[:60]
+            self.component = ""
+            return
+
+        if "unmounting" in line_lower:
             self.phase = RestorePhase.SEALING
             return
 
-        if "Sealing System Volume" in line or "sealing" in line.lower():
+        if "sealing" in line_lower:
             self.phase = RestorePhase.SEALING
             self._parse_percent(line)
             return
 
-        if "Restore Finished" in line:
-            self.done = True
-            self.success = True
-            self.phase = RestorePhase.DONE
-            self.percent = 100
+    def _finish_success(self):
+        self.done = True
+        self.success = True
+        self.phase = RestorePhase.DONE
+        self.percent = 100
 
     def _parse_percent(self, line: str) -> None:
-        m = re.search(r"(\d+)\.\d%", line)
+        m = re.search(r"(\d+)\.?\d*\s*%", line)
         if m:
-            self.percent = int(m.group(1))
+            try:
+                self.percent = int(m.group(1))
+            except ValueError:
+                pass
 
     def _extract_component(self, line: str) -> str:
         m = re.search(r"\((.*?)\)", line)
@@ -115,10 +121,12 @@ class RestoreProgress:
 
 
 class RestoreRunner:
-    def __init__(self, sudo_password: str | None = None):
+    def __init__(self, sudo_password: str | None = None, use_sudo: bool = False):
         self.sudo_password = sudo_password
+        self.use_sudo = use_sudo
+        self._proc: subprocess.Popen | None = None
 
-    def run(self, action: RestoreAction) -> RestoreProgress:
+    def run(self, action: RestoreAction) -> Generator[RestoreProgress, None, None]:
         progress = RestoreProgress()
         cmd = ["idevicerestore", "-l", "-y"]
         if action == RestoreAction.ERASE:
@@ -127,36 +135,44 @@ class RestoreRunner:
         try:
             if self.sudo_password:
                 full_cmd = ["sudo", "-S"] + cmd
-                proc = subprocess.Popen(
+                self._proc = subprocess.Popen(
                     full_cmd,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
                 )
-                assert proc.stdin is not None
-                proc.stdin.write(self.sudo_password + "\n")
-                proc.stdin.flush()
+                assert self._proc.stdin is not None
+                self._proc.stdin.write(self.sudo_password + "\n")
+                self._proc.stdin.flush()
+            elif self.use_sudo:
+                full_cmd = ["sudo", "-n"] + cmd
+                self._proc = subprocess.Popen(
+                    full_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
             else:
-                proc = subprocess.Popen(
+                self._proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
                 )
 
-            assert proc.stdout is not None
-            for line in proc.stdout:
+            assert self._proc.stdout is not None
+            for line in iter(self._proc.stdout.readline, ""):
                 line = line.strip()
                 if line:
                     progress.update(line)
                     yield progress
 
-            proc.wait()
-            if proc.returncode != 0 and not progress.success:
+            self._proc.wait()
+            if self._proc.returncode != 0 and not progress.success:
                 progress.done = True
                 progress.success = False
-                progress.error = f"Process exited with code {proc.returncode}"
+                progress.error = f"Process exited with code {self._proc.returncode}"
                 yield progress
 
         except FileNotFoundError:
@@ -169,6 +185,17 @@ class RestoreRunner:
             progress.success = False
             progress.error = str(e)
             yield progress
+        finally:
+            self._proc = None
+
+    def cancel(self):
+        if self._proc and self._proc.poll() is None:
+            self._proc.send_signal(signal.SIGINT)
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+                self._proc.wait()
 
 
 def check_dependencies() -> list[str]:
