@@ -17,8 +17,16 @@ from textual.widgets import (
     Static,
 )
 
-from ifix_ios.core.detector import DeviceDetector, DeviceMode, DeviceInfo
+from ifix_ios.core.detector import (
+    DeviceDetector,
+    DeviceInfo,
+    DeviceMode,
+    MODE_COLORS,
+    MODE_ICONS,
+    MODE_LABELS,
+)
 from ifix_ios.core.firmware import get_device_guide, device_name, latest_signed
+from ifix_ios.core.guide_agent import GuideAgent, StepType
 from ifix_ios.core.installer import ensure_deps
 from ifix_ios.core.restore import (
     RestoreAction,
@@ -26,23 +34,12 @@ from ifix_ios.core.restore import (
 )
 
 
-MODE_COLORS = {
-    DeviceMode.NORMAL: "green",
-    DeviceMode.RECOVERY: "yellow",
-    DeviceMode.DFU: "red",
-    DeviceMode.BOOTLOOP: "red",
-    DeviceMode.ABSENT: "gray",
-    DeviceMode.UNKNOWN: "yellow",
-}
-
-MODE_ICONS = {
-    DeviceMode.NORMAL: "✓",
-    DeviceMode.RECOVERY: "⚠",
-    DeviceMode.DFU: "!!",
-    DeviceMode.BOOTLOOP: "✗",
-    DeviceMode.ABSENT: "○",
-    DeviceMode.UNKNOWN: "?",
-}
+def _section_line(title: str) -> str:
+    side = "─── "
+    gap = " ───"
+    inner = f"{side}{title}{gap}"
+    padding = max(0, 36 - len(inner))
+    return f"[b]{inner}{'─' * padding}[/]"
 
 
 class DevicePanel(Static):
@@ -54,17 +51,30 @@ class DevicePanel(Static):
         self.styles.height = "100%"
 
     def watch_device(self, dev: DeviceInfo):
-        if dev.mode == DeviceMode.ABSENT:
-            self.update("")
-            return
+        self._dev = dev
+        self.update(self._build_content())
 
-        color = MODE_COLORS.get(dev.mode, "white")
-        icon = MODE_ICONS.get(dev.mode, "?")
-        mode_display = f"[{color}]{icon} {dev.mode.value.upper()}[/]"
-        lines = [
-            "[b]── DISPOSITIVO ──[/b]",
-            f"  Estado:   {mode_display}",
-        ]
+    def _build_content(self) -> str:
+        dev = self._dev
+        if dev.mode == DeviceMode.ABSENT:
+            return "\n".join([
+                "",
+                _section_line("DISPOSITIVO"),
+                "",
+                "  [dim]○ No hay dispositivo conectado.[/]",
+                "",
+                "  Conectá un iPhone/iPad por USB",
+                "  y presioná [b cyan]D[/] para detectar.",
+                "",
+            ])
+
+        mode = dev.mode
+        color = MODE_COLORS.get(mode, "white")
+        icon = MODE_ICONS.get(mode, "?")
+        label = MODE_LABELS.get(mode, mode.value.upper())
+
+        lines = ["", _section_line("DISPOSITIVO"), ""]
+        lines.append(f"  Estado:   [{color}]{icon} {label}[/]")
         if dev.device_name:
             lines.append(f"  Nombre:   {dev.device_name}")
         if dev.product_type:
@@ -73,7 +83,7 @@ class DevicePanel(Static):
             ver = f"{dev.product_version} ({dev.build or '?'})" if dev.build else dev.product_version
             lines.append(f"  iOS:      {ver}")
         if dev.udid:
-            lines.append(f"  UDID:     {dev.udid[:24]}...")
+            lines.append(f"  UDID:     {dev.udid[:20]}...")
         if dev.ecid:
             lines.append(f"  ECID:     {dev.ecid}")
         if dev.serial:
@@ -85,24 +95,26 @@ class DevicePanel(Static):
             lines.append(f"  Batería:  {bars} {dev.battery_level}%")
         if dev.usb_id:
             lines.append(f"  USB PID:  0x{dev.usb_id}")
-        lines.extend([
-            "",
-            "[b]── ACCIONES ──[/b]",
-            "",
-            "  [b cyan]D[/]  Detectar ahora",
-            "  [b cyan]U[/]  Update (preserva datos)",
-            "  [b cyan]E[/]  Erase restore (borra todo)",
-            "  [b cyan]F[/]  Auto Fix",
-            "  [b cyan]G[/]  Guía paso a paso",
-            "  [b cyan]S[/]  Setup (instalar deps)",
-            "  [b cyan]Q[/]  Salir",
-            "",
-            f"  [green]✓[/]  Normal",
-            f"  [yellow]⚠[/]  Recovery / Boot-loop",
-            f"  [red]!![/]   DFU",
-            f"  [gray]○[/]   No conectado",
-        ])
-        self.update("\n".join(lines))
+
+        lines.append("")
+        lines.append(_section_line("ACCIONES"))
+        lines.append("")
+        lines.append("  [b cyan]D[/] Detectar  [b cyan]U[/] Update")
+        lines.append("  [b cyan]E[/] Erase     [b cyan]F[/] Auto Fix")
+        lines.append("  [b cyan]G[/] Guía      [b cyan]S[/] Setup")
+        lines.append("")
+        lines.append(_section_line("LEYENDA"))
+        lines.append("")
+        for m, ic, c, lab in [
+            (DeviceMode.NORMAL, "✓", "green", "Normal"),
+            (DeviceMode.RECOVERY, "⚠", "yellow", "Recovery / Boot-loop"),
+            (DeviceMode.DFU, "!!", "red", "DFU"),
+            (DeviceMode.ABSENT, "○", "gray", "No conectado"),
+        ]:
+            lines.append(f"  [{c}]{ic}[/]  {lab}")
+        lines.append("")
+
+        return "\n".join(lines)
 
 
 class LogPanel(RichLog):
@@ -119,11 +131,11 @@ class FooterBar(Static):
 class MainScreen(Screen):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("d", "detect", "Detect"),
+        Binding("d", "detect", "Detectar"),
         Binding("u", "update", "Update"),
         Binding("e", "erase", "Erase"),
         Binding("f", "fix", "Auto Fix"),
-        Binding("g", "guide", "Guide"),
+        Binding("g", "guide", "Guía"),
         Binding("s", "setup", "Setup"),
     ]
 
@@ -132,7 +144,7 @@ class MainScreen(Screen):
         yield Horizontal(
             DevicePanel(),
             Vertical(
-                Label("╔═══════════════════════════════════════╗", id="log-header"),
+                Static("LOG", id="log-header"),
                 LogPanel(),
                 ProgressBar(total=100, show_eta=False, id="progress"),
                 id="right-panel",
@@ -145,6 +157,7 @@ class MainScreen(Screen):
     def __init__(self):
         super().__init__()
         self._last_mode: DeviceMode | None = None
+        self._guide_running = False
 
     def on_mount(self) -> None:
         self._auto_refresh_interval = self.set_interval(2, self._auto_refresh)
@@ -188,13 +201,14 @@ class MainScreen(Screen):
 
         if dev.mode == DeviceMode.ABSENT:
             if mode_changed:
-                self._write_log("[dim]○ No hay dispositivo conectado[/]")
+                self._write_log("[dim]○ No hay dispositivo conectado.[/]")
             self._update_footer(dev)
             return
 
         color = MODE_COLORS.get(dev.mode, "white")
         icon = MODE_ICONS.get(dev.mode, "?")
-        self._write_log(f"[{color}]{icon} [{color}]{dev.mode.value.upper()}[/]")
+        label = MODE_LABELS.get(dev.mode, dev.mode.value.upper())
+        self._write_log(f"[{color}]{icon} [{color}]{label}[/]")
         if dev.device_name and dev.product_version:
             self._write_log(f"   {dev.device_name} — iOS {dev.product_version}")
         elif not dev.device_name and not dev.product_version:
@@ -211,10 +225,10 @@ class MainScreen(Screen):
         if dev is None:
             detector = DeviceDetector()
             dev = detector.detect()
-        self._write_log("[bold]── Guía paso a paso ──[/]")
+        self._write_log(_section_line("GUÍA"))
         for line in get_device_guide(dev):
             self._write_log(line)
-        self._write_log("[bold]─────────────────────[/]")
+        self._write_log(f"[dim]{'─' * 36}[/]")
 
     def action_guide(self) -> None:
         logger = self.query_one(LogPanel)
@@ -222,7 +236,7 @@ class MainScreen(Screen):
         detector = DeviceDetector()
         dev = detector.detect()
         if dev.mode == DeviceMode.ABSENT:
-            self._write_log("[dim]○ No hay dispositivo conectado[/]")
+            self._write_log("[dim]○ No hay dispositivo conectado.[/]")
             return
         self.show_guide(dev)
 
@@ -232,7 +246,8 @@ class MainScreen(Screen):
             return
         color = MODE_COLORS.get(dev.mode, "white")
         icon = MODE_ICONS.get(dev.mode, "?")
-        left = f"[{color}]{icon} {dev.mode.value.upper()}[/]"
+        label = MODE_LABELS.get(dev.mode, dev.mode.value.upper())
+        left = f"[{color}]{icon} {label}[/]"
         if dev.device_name:
             left += f" — {dev.device_name}"
         right = "[dim]Q[/]uit [dim]D[/]etect [dim]U[/]pdate [dim]E[/]rase [dim]F[/]ix [dim]G[/]uide [dim]S[/]etup"
@@ -266,6 +281,70 @@ class MainScreen(Screen):
             self.app_log("[red]✗ Falló instalación[/]")
             self.app_log("[yellow]Ejecutá [bold cyan]sudo dnf install libimobiledevice-utils[/] manualmente[/]")
 
+    @work(thread=True)
+    def action_fix(self) -> None:
+        self._run_smart_guide()
+
+    def _run_smart_guide(self):
+        if self._guide_running:
+            self.app_log("[yellow]Ya hay una guía en ejecución[/]")
+            return
+        self._guide_running = True
+        self._clear_log()
+        self._update_progress(0, 100)
+        self.app_log(_section_line("AUTO FIX"))
+
+        if not ensure_deps():
+            self.app_log("[red]Faltan dependencias del sistema. Presiona [bold]S[/] para instalar[/]")
+            self._guide_running = False
+            return
+
+        agent = GuideAgent(use_sudo=True)
+        diagnosis = agent.diagnose()
+
+        if diagnosis.device.mode == DeviceMode.ABSENT:
+            self.app_log("[yellow]○ No hay dispositivo conectado. Conecta un iPhone/iPad por USB.[/]")
+            self._guide_running = False
+            return
+
+        if diagnosis.device.mode == DeviceMode.NORMAL:
+            self.app_log("[green]✓ Dispositivo funcionando correctamente. No requiere reparación.[/]")
+            self._guide_running = False
+            return
+
+        icon = MODE_ICONS.get(diagnosis.device.mode, "?")
+        color = MODE_COLORS.get(diagnosis.device.mode, "white")
+        label = MODE_LABELS.get(diagnosis.device.mode, diagnosis.device.mode.value.upper())
+        self.app_log(f"[{color}]{icon} Diagnóstico: {diagnosis.title}[/]")
+        for d in diagnosis.details:
+            self.app_log(f"  {d}")
+
+        plan = agent.build_plan(diagnosis)
+        self.app_log(f"[dim]{plan.label}[/]")
+
+        if diagnosis.device.mode == DeviceMode.DFU:
+            self.app_log("[yellow]⚠ DFU requiere erase. Presiona [bold]E[/] para confirmar manualmente o continúo automáticamente...[/]")
+
+        for event in agent.run_plan(plan, confirm_callback=self._confirm_erase):
+            if event.message:
+                self.app_log(event.message)
+            if event.step == StepType.ERASE_RESTORE and event.done:
+                if event.success:
+                    self._set_progress_done(True)
+                elif event.error == "cancelado":
+                    self.app_log("[yellow]Erase cancelado, probando siguiente paso...[/]")
+            if event.done and not event.success and event.error not in ("cancelado", "absent"):
+                self.app_log("[yellow]→ Intentando siguiente paso...[/]")
+            self._update_progress(event.progress, 100)
+
+        self.app_log("[bold green]✓ Auto Fix completado[/]")
+        self._guide_running = False
+
+    def _confirm_erase(self, msg: str) -> bool:
+        self._write_log(f"[red]{msg}[/]")
+        self._write_log("[yellow]⚠ Confirmación automática en Auto Fix[/]")
+        return True
+
     def _run_restore_workflow(self, action: RestoreAction) -> None:
         action_name = "update" if action == RestoreAction.UPDATE else "erase restore"
         self.app_log(f"[bold yellow]▶ Iniciando {action_name}...[/]")
@@ -274,8 +353,8 @@ class MainScreen(Screen):
             self.app_log("[red]Faltan dependencias. Presiona [bold]S[/] para setup[/]")
             return
 
-        runner = RestoreRunner()
-        self._update_progress(0, 0)
+        runner = RestoreRunner(use_sudo=True)
+        self._update_progress(0, 100)
         last_phase = ""
 
         for state in runner.run(action):
@@ -295,51 +374,18 @@ class MainScreen(Screen):
         self.app.call_from_thread(self._do_update_progress, value, total)
 
     def _do_update_progress(self, value: int, total: int):
-        progress = self.query_one(ProgressBar)
-        if progress.total != total:
-            progress.update(total=total)
-        progress.update(advance=value - progress.progress)
+        self.query_one(ProgressBar).update(total=total, progress=value)
 
     def _set_progress_done(self, success: bool):
         self.app.call_from_thread(self._do_progress_done, success)
 
     def _do_progress_done(self, success: bool):
-        progress = self.query_one(ProgressBar)
-        progress.progress = 100
+        self._do_update_progress(100, 100)
         if success:
             self._write_log("[green]✓ Restore completado. El dispositivo debería reiniciarse.[/]")
             self._write_log("[dim]Desconecta el cable cuando veas la pantalla de configuración.[/]")
         else:
             self._write_log("[red]✗ Falló el restore[/]")
-
-    @work(thread=True)
-    def action_fix(self) -> None:
-        self.app_log("[bold yellow]▶ Auto Fix...[/]")
-
-        if not ensure_deps():
-            self.app_log("[red]Faltan dependencias. Presiona [bold]S[/] para setup[/]")
-            return
-
-        detector = DeviceDetector()
-        dev = detector.detect()
-        mode = dev.mode
-
-        self.app_log(f"Estado detectado: [bold]{mode.value.upper()}[/]")
-
-        if mode == DeviceMode.ABSENT:
-            self.app_log("[red]No hay dispositivo conectado.[/]")
-            return
-
-        if mode == DeviceMode.NORMAL:
-            self.app_log("[green]✓ Dispositivo saludable. No se necesita reparación.[/]")
-            return
-
-        if mode in (DeviceMode.BOOTLOOP, DeviceMode.RECOVERY):
-            self.app_log("[yellow]→ Intentando update (preserva datos)...[/]")
-            self._run_restore_workflow(RestoreAction.UPDATE)
-        elif mode == DeviceMode.DFU:
-            self.app_log("[yellow]→ DFU requiere erase restore completo[/]")
-            self._run_restore_workflow(RestoreAction.ERASE)
 
 
 CSS_PATH = Path(__file__).parent / "ifix_ios.tcss"

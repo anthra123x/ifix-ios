@@ -5,6 +5,7 @@ Screen {
 Header {
     background: #24253a;
     color: #c0caf5;
+    text-style: bold;
 }
 
 Footer {
@@ -18,9 +19,8 @@ Footer {
 }
 
 DevicePanel {
-    width: 34;
-    min-width: 34;
-    padding: 0 1;
+    width: 38;
+    min-width: 38;
     background: #1f2137;
     border-right: solid #2f3148;
     height: 100%;
@@ -37,6 +37,7 @@ DevicePanel {
     background: #24253a;
     color: #565f89;
     text-style: bold;
+    padding: 0 1 0 2;
 }
 
 LogPanel {
@@ -44,6 +45,10 @@ LogPanel {
     background: #1a1b26;
     color: #c0caf5;
     padding: 0 1;
+    scrollbar-size: 1 1;
+    scrollbar-color: #2f3148;
+    scrollbar-color-hover: #3b3f5c;
+    scrollbar-color-active: #565f89;
 }
 
 ProgressBar {
@@ -61,17 +66,13 @@ ProgressBar > .complete {
     color: #9ece6a;
 }
 
+ProgressBar > .remaining {
+    color: #1a1b26;
+}
+
 FooterBar {
     background: #24253a;
     color: #565f89;
     padding: 0 2;
-    text-style: bold;
-}
-
-Button {
-    width: 100%;
-}
-
-Button:hover {
     text-style: bold;
 }
