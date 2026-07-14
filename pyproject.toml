@@ -27,3 +27,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.txt", "*.md"]
+
+[tool.pytest.ini_options]
+markers = [
+    "stress: stress/load tests (slower, exercise edge cases)",
+    "integration: tests that need real device or system deps",
+]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:usb.*:",
+]
