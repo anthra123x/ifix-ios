@@ -45,7 +45,7 @@ La TUI se abre inmediatamente. Sin dispositivo conectado se ve limpia:
 │  S  Setup             │                                  │
 │  Q  Salir             │                                  │
 ├───────────────────────┴──────────────────────────────────┤
-│ ○ No conectado                                           │
+│ ○ No conectado — Q D U E F G S M                         │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -70,7 +70,7 @@ Al conectar un iPhone, en ≤2s se actualiza automáticamente:
 │  S  Setup            │                                    │
 │  Q  Salir            │                                    │
 ├──────────────────────┴───────────────────────────────────┤
-│ ✓ NORMAL — iPhone de Prueba │ Q D U E F G S              │
+│ ✓ NORMAL — iPhone de Prueba │ Q D U E F G S M            │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -84,6 +84,7 @@ Al conectar un iPhone, en ≤2s se actualiza automáticamente:
 | `G` | Guide | Muestra diagnóstico y guía paso a paso |
 | `D` | Detect | Refresca detección manualmente |
 | `S` | Setup | Instala dependencias del sistema (`sudo`) |
+| `M` | Monitor | Monitorea el dispositivo en tiempo real |
 | `Q` | Quit | Salir |
 
 > El tool **busca automáticamente** la última versión de iOS firmada por Apple
@@ -182,10 +183,11 @@ ifix-ios setup
 ## 🧪 Modo simulado (pruebas sin iPhone real)
 
 ```bash
-python dev/mock_device.py normal
-python dev/mock_device.py bootloop
-python dev/mock_device.py recovery
-python dev/mock_device.py dfu
+python dev/mock_device.py normal    # simula iPhone normal
+python dev/mock_device.py recovery  # simula modo recovery
+python dev/mock_device.py dfu       # simula modo DFU
+python dev/mock_device.py bootloop  # simula boot-loop
+python dev/mock_device.py clear     # restaura acceso a dispositivo real
 ```
 
 ---
@@ -213,18 +215,44 @@ python dev/mock_device.py dfu
 ```
 ifix-ios/
 ├── src/ifix_ios/
-│   ├── app.py              # CLI con Click (ifix-ios detect/update/...)
-│   ├── tui_app.py           # TUI interactiva con Textual
+│   ├── app.py              # CLI con Click (detect/fix/update/guide/...)
+│   ├── tui_app.py           # TUI interactiva con Textual + Rich
 │   ├── ifix_ios.tcss        # Estilos CSS Tokyo Night
 │   └── core/
-│       ├── detector.py      # Detección USB (pyusb + lsusb)
-│       ├── restore.py       # Wrapper de idevicerestore
-│       ├── firmware.py      # Consulta de versiones iOS (ipsw.me)
-│       └── installer.py     # Instalador automático de deps
-├── dev/mock_device.py       # Simulador para pruebas
+│       ├── detector.py      # Detección USB (pyusb + lsusb), DeviceInfo, caché persistente
+│       ├── restore.py       # Wrapper de idevicerestore con parseo de progreso
+│       ├── guide_agent.py   # Diagnóstico inteligente + plan de reparación con fallback
+│       ├── firmware.py      # Consulta de versiones iOS (ipsw.me + caché)
+│       └── installer.py     # Instalador automático de dependencias del sistema
+├── dev/mock_device.py       # Simulador de dispositivo para pruebas offline
 └── tests/
-    ├── test_detector.py
-    └── test_restore.py
+    ├── test_detector.py     # Tests de detección USB y caché
+    ├── test_restore.py      # Tests de parseo de progreso de restore
+    ├── test_guide_agent.py  # Tests de diagnóstico y plan de reparación
+    └── test_stress.py       # Tests de estrés (41): modos, transiciones, concurrencia
+```
+
+---
+
+## 🧪 Protocolo de test
+
+Después de cualquier cambio, ejecutá el protocolo completo:
+
+```bash
+make test-protocol
+```
+
+Flujo:
+1. Verifica importaciones
+2. **37 tests unitarios** (detector, guía, restore parser)
+3. **41 tests de estrés** (todos los modos, transiciones, edge cases, concurrencia)
+4. Limpieza automática
+
+Para iteración rápida:
+```bash
+make test-quick     # solo unitarios
+make test-stress    # solo estrés
+make test-coverage  # con reporte HTML en /tmp/ifix-ios-coverage
 ```
 
 ---
