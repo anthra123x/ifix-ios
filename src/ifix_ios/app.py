@@ -2,8 +2,9 @@ import sys
 
 import click
 
-from ifix_ios.core.detector import DeviceDetector, format_device_info
+from ifix_ios.core.detector import DeviceDetector, DeviceMode, format_device_info, MODE_COLORS, MODE_ICONS
 from ifix_ios.core.firmware import get_device_guide, device_name, latest_signed
+from ifix_ios.core.guide_agent import GuideAgent, StepType
 from ifix_ios.core.installer import ensure_deps, are_deps_installed, install_deps
 from ifix_ios.core.restore import (
     RestoreAction,
@@ -30,14 +31,87 @@ def detect():
     detector = DeviceDetector()
     dev = detector.detect()
 
-    table = format_device_info(dev)
     from rich.console import Console
-    Console().print(table)
+    console = Console()
 
-    if dev.mode.value == "bootloop":
-        click.echo("\n" + click.style("⚠ Device in boot-loop. Try: ifix-ios fix", fg="yellow"))
-    elif dev.mode.value == "absent":
-        click.echo("\n" + click.style("No Apple device detected. Connect via USB.", fg="yellow"))
+    if dev.mode == DeviceMode.ABSENT:
+        console.print("[yellow]○ No hay dispositivo iOS conectado.[/]")
+        console.print("  Conecta un iPhone/iPad por USB y ejecuta de nuevo.")
+        return
+
+    console.print(format_device_info(dev))
+
+    # Show quick diagnosis
+    agent = GuideAgent()
+    diagnosis = agent.diagnose(dev)
+    color = MODE_COLORS.get(dev.mode, "white")
+    icon = MODE_ICONS.get(dev.mode, "?")
+    console.print(f"\n[{color}]{icon} {diagnosis.title}[/]")
+    console.print(f"  {diagnosis.description}")
+
+    if dev.mode in (DeviceMode.BOOTLOOP, DeviceMode.RECOVERY, DeviceMode.DFU):
+        console.print(f"\n[bold cyan]Recomendación:[/] [green]ifix-ios fix[/] [dim]o presiona F en la TUI[/]")
+
+
+@cli.command()
+@click.option("--yes", "-y", is_flag=True, help="Auto-confirm all prompts")
+@click.option("--sudo-password", "-p", help="sudo password (omit for automatic detection)")
+def fix(yes, sudo_password):
+    """Auto-detect issue and apply best fix with fallback."""
+    if not ensure_deps(sudo_password):
+        return
+
+    agent = GuideAgent(sudo_password=sudo_password)
+    diagnosis = agent.diagnose()
+    dev = diagnosis.device
+
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.markup import escape
+    console = Console()
+
+    if dev.mode == DeviceMode.ABSENT:
+        console.print("[yellow]○ No hay dispositivo conectado.[/]")
+        console.print("  Conecta un iPhone/iPad por USB y ejecuta de nuevo.")
+        return
+
+    color = MODE_COLORS.get(dev.mode, "white")
+    icon = MODE_ICONS.get(dev.mode, "?")
+    console.print()
+    console.print(Panel(
+        f"[{color}]{icon} {diagnosis.title}[/]\n"
+        f"  {diagnosis.description}\n"
+        + "\n".join(f"  {d}" for d in diagnosis.details) if diagnosis.details else "",
+        title="[bold]Diagnóstico[/]",
+        border_style=color,
+    ))
+
+    if dev.mode == DeviceMode.NORMAL:
+        console.print("[green]✓ Dispositivo saludable. No se necesita reparación.[/]")
+        return
+
+    plan = agent.build_plan(diagnosis)
+    console.print(f"\n[dim]Plan: {plan.label}[/]")
+
+    if not yes and dev.mode == DeviceMode.DFU:
+        if not click.confirm("\n⚠ DFU requiere erase restore (borra TODOS los datos). ¿Continuar?", default=False):
+            console.print("[yellow]Cancelado por el usuario.[/]")
+            return
+
+    console.print()
+    with console.status("[bold cyan]Ejecutando plan de reparación...[/]") as status:
+        for event in agent.run_plan(plan):
+            if event.message and event.step != StepType.ENTER_RECOVERY:
+                status.update(f"[bold cyan]{event.message[:60]}[/]")
+            if event.done:
+                if event.success:
+                    console.print(f"  [green]✓ {event.message}[/]")
+                elif event.error == "absent":
+                    console.print(f"  [yellow]⚠ {event.message}[/]")
+                else:
+                    console.print(f"  [red]✗ {event.message}[/]")
+                    if plan.current_step < len(plan.steps) - 1:
+                        console.print("  [yellow]→ Probando siguiente paso...[/]")
 
 
 @cli.command()
@@ -60,74 +134,33 @@ def restore(sudo_password):
 
 
 @cli.command()
-@click.option("--sudo-password", "-p", default=None)
-def fix(sudo_password):
-    """Auto-detect issue and apply best fix."""
-    if not ensure_deps(sudo_password):
-        return
-
-    detector = DeviceDetector()
-    dev = detector.detect()
-    mode = dev.mode
-
-    if mode.value == "absent":
-        click.secho("No Apple device detected.", fg="yellow")
-        return
-
-    click.secho(f"Device mode: {mode.value.upper()}", bold=True)
-    table = format_device_info(dev)
-    from rich.console import Console
-    Console().print(table)
-
-    if mode.value == "normal":
-        click.secho("✅ Device appears healthy. No fix needed.", fg="green")
-        return
-
-    if mode.value == "bootloop":
-        click.secho("\nBoot-loop detected.", fg="yellow", bold=True)
-        click.echo("Recommendation: Try update first (preserves data).")
-        if click.confirm("Run update (preserve data)?"):
-            _run_restore(RestoreAction.UPDATE, sudo_password)
-        elif click.confirm("Run full erase restore?"):
-            _run_restore(RestoreAction.ERASE, sudo_password)
-        return
-
-    if mode.value == "recovery":
-        click.secho("\nDevice in Recovery Mode.", fg="yellow", bold=True)
-        if click.confirm("Attempt update (preserve data)?"):
-            _run_restore(RestoreAction.UPDATE, sudo_password)
-        elif click.confirm("Run full erase restore?"):
-            _run_restore(RestoreAction.ERASE, sudo_password)
-        return
-
-    if mode.value == "dfu":
-        click.secho("\nDevice in DFU Mode.", fg="red", bold=True)
-        click.echo("DFU requires a full erase restore.")
-        if click.confirm("Proceed with erase restore?"):
-            _run_restore(RestoreAction.ERASE, sudo_password)
-        return
-
-
-@cli.command()
 def guide():
     """Diagnóstico y guía paso a paso según el estado del dispositivo."""
     from rich.console import Console
     console = Console()
 
-    detector = DeviceDetector()
-    dev = detector.detect()
+    agent = GuideAgent()
+    diagnosis = agent.diagnose()
+    dev = diagnosis.device
 
-    if dev.mode.value == "absent":
-        click.secho("🔌 No hay dispositivo conectado.", fg="yellow")
-        click.echo("   Conecta un iPhone/iPad por USB y ejecuta de nuevo.")
+    if dev.mode == DeviceMode.ABSENT:
+        console.print("[yellow]🔌 No hay dispositivo conectado.[/]")
+        console.print("   Conecta un iPhone/iPad por USB y ejecuta de nuevo.")
         return
 
     console.print()
     nice = device_name(dev.product_type or "?")
-    console.print(f"📱 [bold]{nice}[/] [dim]({dev.product_type or '?'})[/]")
+    console.print(f"[bold]{diagnosis.title}[/]")
+    console.print(f"  {diagnosis.description}")
+
+    if dev.product_type:
+        console.print(f"\n📱 [bold]{nice}[/] [dim]({dev.product_type})[/]")
     if dev.device_name:
         console.print(f"   Nombre: {dev.device_name}")
+    if dev.product_version:
+        console.print(f"📦 iOS: {dev.product_version}")
 
+    console.print()
     for line in get_device_guide(dev):
         console.print(line)
 
@@ -135,7 +168,8 @@ def guide():
     console.print("[bold cyan]Presiona una tecla:[/]")
     console.print("  [cyan]U[/] = Update (preserva datos)")
     console.print("  [cyan]E[/] = Erase restore (borra todo)")
-    if dev.mode.value in ("bootloop", "recovery"):
+    console.print("  [cyan]F[/] = Auto Fix (recomendado)")
+    if dev.mode in ("bootloop", "recovery"):
         console.print("  [cyan]R[/] = Forzar entrada a Recovery Mode")
     console.print("  [cyan]Q[/] = Salir")
 
